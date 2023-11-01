@@ -1,0 +1,11 @@
+--- clevis-18.ori/src/luks/clevis-luks-edit	2021-04-15 13:00:19.965065700 +0200
++++ clevis-18/src/luks/clevis-luks-edit	2023-01-16 10:24:18.555971552 +0100
+@@ -173,7 +173,7 @@
+ 
+ echo "Updating binding..."
+ if ! clevis_luks_do_bind "${DEV}" "${SLT}" "" "${pin}" "${new_cfg}" \
+-                         "-y" "overwrite" 2>/dev/null; then
++                         "-y" "overwrite"; then
+     echo "Unable to update binding in ${DEV}:${SLT}. Operation cancelled." >&2
+     exit 1
+ fi

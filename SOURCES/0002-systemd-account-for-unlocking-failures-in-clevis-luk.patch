@@ -1,0 +1,41 @@
+From d3010c89a8f516a0c9695a939a8cccca0918da2b Mon Sep 17 00:00:00 2001
+From: Sergio Correia <scorreia@redhat.com>
+Date: Fri, 29 Oct 2021 12:04:46 -0300
+Subject: [PATCH 2/2] systemd: account for unlocking failures in
+ clevis-luks-askpass (#343)
+
+As unlock may fail for some reason, e.g. the network is not up yet,
+one way cause problems would be to add extra `rd.luks.uuid' params
+to the cmdline, which would then cause such devices to be unlocked
+in early boot. If the unlocking fail, those devices might not be
+accounted for in the clevis_devices_to_unlock() check, as it is
+based on crypttab.
+
+Let's make sure there are no pending ask.* sockets waiting to be
+answered, before exiting.
+
+Related: https://bugzilla.redhat.com/show_bug.cgi?id=1878892
+---
+ src/luks/systemd/clevis-luks-askpass.in | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/luks/systemd/clevis-luks-askpass.in b/src/luks/systemd/clevis-luks-askpass.in
+index 8f54859..a6699c9 100755
+--- a/src/luks/systemd/clevis-luks-askpass.in
++++ b/src/luks/systemd/clevis-luks-askpass.in
+@@ -67,8 +67,11 @@ while true; do
+     done
+ 
+     [ "${loop}" != true ] && break
++
+     # Checking for pending devices to be unlocked.
+-    if remaining=$(clevis_devices_to_unlock) && [ -z "${remaining}" ]; then
++    remaining_crypttab=$(clevis_devices_to_unlock) ||:
++    remaining_askfiles=$(ls "${path}"/ask.* 2>/dev/null) ||:
++    if [ -z "${remaining_crypttab}" ] && [ -z "${remaining_askfiles}" ]; then
+         break;
+     fi
+ 
+-- 
+2.33.1
+
