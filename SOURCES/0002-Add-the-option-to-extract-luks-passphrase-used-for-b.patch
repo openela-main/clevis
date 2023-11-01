@@ -1,0 +1,309 @@
+From aa52396c35e76aabd085a819b08167d559042a20 Mon Sep 17 00:00:00 2001
+From: rpm-build <rpm-build>
+Date: Tue, 3 Nov 2020 08:42:48 -0300
+Subject: [PATCH 2/2] Add the option to extract luks passphrase used for
+ binding
+
+Usage:
+
+clevis luks pass -d /dev/sda1 -s 1
+<passphrase here>
+---
+ src/luks/clevis-luks-pass        | 64 ++++++++++++++++++++++++++++++++
+ src/luks/clevis-luks-pass.1.adoc | 43 +++++++++++++++++++++
+ src/luks/meson.build             |  3 ++
+ src/luks/tests/meson.build       |  2 +
+ src/luks/tests/pass-tang-luks1   | 59 +++++++++++++++++++++++++++++
+ src/luks/tests/pass-tang-luks2   | 59 +++++++++++++++++++++++++++++
+ 6 files changed, 230 insertions(+)
+ create mode 100755 src/luks/clevis-luks-pass
+ create mode 100644 src/luks/clevis-luks-pass.1.adoc
+ create mode 100755 src/luks/tests/pass-tang-luks1
+ create mode 100755 src/luks/tests/pass-tang-luks2
+
+diff --git a/src/luks/clevis-luks-pass b/src/luks/clevis-luks-pass
+new file mode 100755
+index 0000000..1f59b39
+--- /dev/null
++++ b/src/luks/clevis-luks-pass
+@@ -0,0 +1,64 @@
++#!/bin/bash -e
++# vim: set ts=8 shiftwidth=4 softtabstop=4 expandtab smarttab colorcolumn=80:
++#
++# Copyright (c) 2019 Red Hat, Inc.
++# Author: Sergio Correia <scorreia@redhat.com> - LUKS2 support.
++#
++# This program is free software: you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation, either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++#
++
++. clevis-luks-common-functions
++
++SUMMARY="Returns the LUKS passphrase used for binding a particular slot."
++
++usage() {
++    exec >&2
++    echo "Usage: clevis luks pass -d DEV -s SLT"
++    echo
++    echo "$SUMMARY"
++    echo
++    echo "  -d DEV  The LUKS device to extract the LUKS passphrase used for binding"
++    echo
++    echo "  -s SLOT The slot number to extract the LUKS passphrase"
++    echo
++    exit 1
++}
++
++if [ ${#} -eq 1 ] && [ "${1}" = "--summary" ]; then
++    echo "${SUMMARY}"
++    exit 0
++fi
++
++while getopts ":d:s:" o; do
++    case "$o" in
++    d) DEV=${OPTARG};;
++    s) SLT=${OPTARG};;
++    *) usage;;
++    esac
++done
++
++if [ -z "${DEV}" ]; then
++    echo "Did not specify a device!" >&2
++    usage
++fi
++
++if [ -z "${SLT}" ]; then
++    echo "Did not specify a slot!" >&2
++    usage
++fi
++
++if ! clevis_luks_unlock_device_by_slot "${DEV}" "${SLT}"; then
++    echo "It was not possible to decrypt the passphrase associated to slot ${SLT} in ${DEV}!" >&2
++    exit 1
++fi
+diff --git a/src/luks/clevis-luks-pass.1.adoc b/src/luks/clevis-luks-pass.1.adoc
+new file mode 100644
+index 0000000..fa9526a
+--- /dev/null
++++ b/src/luks/clevis-luks-pass.1.adoc
+@@ -0,0 +1,43 @@
++CLEVIS-LUKS-PASS(1)
++===================
++:doctype: manpage
++
++
++== NAME
++
++clevis-luks-pass - Extracts the passphrase used for binding a particular slot in a LUKS device
++
++== SYNOPSIS
++
++*clevis luks pass* -d DEV -s SLT
++
++== OVERVIEW
++
++The *clevis luks pass* command extracts the passphrase used for binding a particular slot in a LUKS device.
++For example:
++
++    clevis luks pass -d /dev/sda1 -s 1
++
++== OPTIONS
++
++* *-d* _DEV_ :
++  The LUKS device on which to extract a passphrase from
++
++* *-s* _SLT_ :
++  The slot to use for extracting the passphrase
++
++== EXAMPLE
++
++    clevis luks pass -d /dev/sda1 -s 1
++    <passphrase here>
++
++Note that the output of *clevis luks pass* might be non-printable, in which case it would be better to redirect its output to a file and use it as a key
++file together with cryptsetup. For instance:
++
++    clevis luks pass -d /dev/sda1 -s 1 > slot1-passphrase
++
++And the file slot1-passphrase will contain the passphrase associated with slot #1 in /dev/sda1.
++
++== SEE ALSO
++
++link:clevis-luks-unlock.1.adoc[*clevis-luks-unlock*(1)],
+diff --git a/src/luks/meson.build b/src/luks/meson.build
+index 12f5a0d..008736e 100644
+--- a/src/luks/meson.build
++++ b/src/luks/meson.build
+@@ -50,6 +50,9 @@ if libcryptsetup.found() and luksmeta.found() and pwmake.found()
+ 
+   bins += join_paths(meson.current_source_dir(), 'clevis-luks-edit')
+   mans += join_paths(meson.current_source_dir(), 'clevis-luks-edit.1')
++
++  bins += join_paths(meson.current_source_dir(), 'clevis-luks-pass')
++  mans += join_paths(meson.current_source_dir(), 'clevis-luks-pass.1')
+ else
+   warning('Will not install LUKS support due to missing dependencies!')
+ endif
+diff --git a/src/luks/tests/meson.build b/src/luks/tests/meson.build
+index c22a069..f4584aa 100644
+--- a/src/luks/tests/meson.build
++++ b/src/luks/tests/meson.build
+@@ -84,6 +84,7 @@ if has_tang
+   test('report-tang-luks1', find_program('report-tang-luks1'), env: env, timeout: 90)
+   test('report-sss-luks1', find_program('report-sss-luks1'), env: env, timeout: 90)
+   test('edit-tang-luks1', find_program('edit-tang-luks1'), env: env, timeout: 150)
++  test('pass-tang-luks1', find_program('pass-tang-luks1'), env: env, timeout: 60)
+ endif
+ 
+ test('backup-restore-luks1', find_program('backup-restore-luks1'), env: env, timeout: 60)
+@@ -111,6 +112,7 @@ if luksmeta_data.get('OLD_CRYPTSETUP') == '0'
+     test('report-tang-luks2', find_program('report-tang-luks2'), env: env, timeout: 120)
+     test('report-sss-luks2', find_program('report-sss-luks2'), env: env, timeout: 120)
+     test('edit-tang-luks2', find_program('edit-tang-luks2'), env: env, timeout: 210)
++    test('pass-tang-luks2', find_program('pass-tang-luks2'), env: env, timeout: 60)
+   endif
+ 
+ test('backup-restore-luks2', find_program('backup-restore-luks2'), env: env, timeout: 120)
+diff --git a/src/luks/tests/pass-tang-luks1 b/src/luks/tests/pass-tang-luks1
+new file mode 100755
+index 0000000..0d91e6c
+--- /dev/null
++++ b/src/luks/tests/pass-tang-luks1
+@@ -0,0 +1,59 @@
++#!/bin/bash -x
++# vim: set tabstop=8 shiftwidth=4 softtabstop=4 expandtab smarttab colorcolumn=80:
++#
++# Copyright (c) 2019 Red Hat, Inc.
++# Author: Sergio Correia <scorreia@redhat.com>
++#
++# This program is free software: you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation, either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++#
++
++TEST="${0}"
++. tests-common-functions
++. clevis-luks-common-functions
++
++function on_exit() {
++    [ ! -d "${TMP}" ] && return 0
++    tang_stop "${TMP}"
++    rm -rf "${TMP}"
++}
++
++trap 'on_exit' EXIT
++
++TMP=$(mktemp -d)
++
++port=$(get_random_port)
++tang_run "${TMP}" "${port}" &
++tang_wait_until_ready "${port}"
++
++url="http://localhost:${port}"
++adv="${TMP}/adv"
++tang_get_adv "${port}" "${adv}"
++
++cfg=$(printf '{"url":"%s","adv":"%s"}' "$url" "$adv")
++
++# LUKS1.
++DEV="${TMP}/luks1-device"
++new_device "luks1" "${DEV}"
++
++if ! clevis luks bind -f -d "${DEV}" tang "${cfg}" <<< "${DEFAULT_PASS}"; then
++    error "${TEST}: Bind should have succeeded."
++fi
++
++# Now let's test the passphrase.
++SLT=1
++PASS=$(clevis luks pass -d "${DEV}" -s "${SLT}")
++echo $PASS >&2
++if ! clevis_luks_check_valid_key_or_keyfile "${DEV}" "${PASS}" "" "${SLT}"; then
++    error "Passphrase obtained from clevis luks pass failed."
++fi
+diff --git a/src/luks/tests/pass-tang-luks2 b/src/luks/tests/pass-tang-luks2
+new file mode 100755
+index 0000000..2d50413
+--- /dev/null
++++ b/src/luks/tests/pass-tang-luks2
+@@ -0,0 +1,59 @@
++#!/bin/bash -x
++# vim: set tabstop=8 shiftwidth=4 softtabstop=4 expandtab smarttab colorcolumn=80:
++#
++# Copyright (c) 2019 Red Hat, Inc.
++# Author: Sergio Correia <scorreia@redhat.com>
++#
++# This program is free software: you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation, either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++#
++
++TEST="${0}"
++. tests-common-functions
++. clevis-luks-common-functions
++
++function on_exit() {
++    [ ! -d "${TMP}" ] && return 0
++    tang_stop "${TMP}"
++    rm -rf "${TMP}"
++}
++
++trap 'on_exit' EXIT
++
++TMP=$(mktemp -d)
++
++port=$(get_random_port)
++tang_run "${TMP}" "${port}" &
++tang_wait_until_ready "${port}"
++
++url="http://localhost:${port}"
++adv="${TMP}/adv"
++tang_get_adv "${port}" "${adv}"
++
++cfg=$(printf '{"url":"%s","adv":"%s"}' "$url" "$adv")
++
++# LUKS2.
++DEV="${TMP}/luks2-device"
++new_device "luks2" "${DEV}"
++
++if ! clevis luks bind -f -d "${DEV}" tang "${cfg}" <<< "${DEFAULT_PASS}"; then
++    error "${TEST}: Bind should have succeeded."
++fi
++
++# Now let's test the passphrase.
++SLT=1
++PASS=$(clevis luks pass -d "${DEV}" -s "${SLT}")
++echo $PASS >&2
++if ! clevis_luks_check_valid_key_or_keyfile "${DEV}" "${PASS}" "" "${SLT}"; then
++    error "Passphrase obtained from clevis luks pass failed."
++fi
+-- 
+2.29.2
+

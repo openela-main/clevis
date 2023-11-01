@@ -1,0 +1,176 @@
+From 16f667d9f3d649e33ca762afa1a8a7f909b953a8 Mon Sep 17 00:00:00 2001
+From: Sergio Correia <scorreia@redhat.com>
+Date: Sun, 25 Oct 2020 11:15:46 -0300
+Subject: [PATCH] Fixes for dealing with newer tang without tangd-update
+
+---
+ src/luks/tests/meson.build               | 11 +----------
+ src/luks/tests/tests-common-functions.in | 19 +++++++++++--------
+ src/pins/tang/meson.build                | 11 +----------
+ src/pins/tang/pin-tang                   | 11 ++++++++---
+ 4 files changed, 21 insertions(+), 31 deletions(-)
+
+diff --git a/src/luks/tests/meson.build b/src/luks/tests/meson.build
+index ba5f6a2..c0f9dc3 100644
+--- a/src/luks/tests/meson.build
++++ b/src/luks/tests/meson.build
+@@ -17,14 +17,6 @@ kgen = find_program(
+   join_paths('/', 'usr', get_option('libexecdir'), 'tangd-keygen'),
+   required: false
+ )
+-updt = find_program(
+-  join_paths(libexecdir, 'tangd-update'),
+-  join_paths(get_option('prefix'), get_option('libdir'), 'tangd-update'),
+-  join_paths(get_option('prefix'), get_option('libexecdir'), 'tangd-update'),
+-  join_paths('/', 'usr', get_option('libdir'), 'tangd-update'),
+-  join_paths('/', 'usr', get_option('libexecdir'), 'tangd-update'),
+-  required: false
+-)
+ tang = find_program(
+   join_paths(libexecdir, 'tangd'),
+   join_paths(get_option('prefix'), get_option('libdir'), 'tangd'),
+@@ -58,11 +50,10 @@ env.prepend('PATH',
+ )
+ 
+ has_tang = false
+-if actv.found() and kgen.found() and updt.found() and tang.found()
++if actv.found() and kgen.found() and tang.found()
+   has_tang = true
+   env.set('SD_ACTIVATE', actv.path())
+   env.set('TANGD_KEYGEN', kgen.path())
+-  env.set('TANGD_UPDATE', updt.path())
+   env.set('TANGD', tang.path())
+ endif
+ 
+diff --git a/src/luks/tests/tests-common-functions.in b/src/luks/tests/tests-common-functions.in
+index 8520715..318d007 100755
+--- a/src/luks/tests/tests-common-functions.in
++++ b/src/luks/tests/tests-common-functions.in
+@@ -251,18 +251,19 @@ tang_remove_rotated_keys() {
+         return 1
+     fi
+ 
+-    [ -z "${TANGD_UPDATE}" ] && skip_test "WARNING: TANGD_UPDATE is not defined."
+-
+     local db="${basedir}/db"
+-    local cache="${basedir}/cache"
+     mkdir -p "${db}"
+-    mkdir -p "${cache}"
++
++    if [ -n "${TANGD_UPDATE}" ]; then
++        local cache="${basedir}/cache"
++        mkdir -p "${cache}"
++    fi
+ 
+     pushd "${db}"
+         find . -name ".*.jwk" -exec rm -f {} \;
+     popd
+ 
+-    "${TANGD_UPDATE}" "${db}" "${cache}"
++    [ -n "${TANGD_UPDATE}" ] && "${TANGD_UPDATE}" "${db}" "${cache}"
+     return 0
+ }
+ 
+@@ -277,12 +278,12 @@ tang_new_keys() {
+     fi
+ 
+     [ -z "${TANGD_KEYGEN}" ] && skip_test "WARNING: TANGD_KEYGEN is not defined."
+-    [ -z "${TANGD_UPDATE}" ] && skip_test "WARNING: TANGD_UPDATE is not defined."
+ 
+     local db="${basedir}/db"
+-    local cache="${basedir}/cache"
+     mkdir -p "${db}"
+ 
++    [ -n "${TANGD_UPDATE}" ] && local cache="${basedir}/cache"
++
+     if [ -n "${rotate}" ]; then
+         pushd "${db}"
+             local k
+@@ -296,7 +297,7 @@ tang_new_keys() {
+     fi
+ 
+     "${TANGD_KEYGEN}" "${db}"
+-    "${TANGD_UPDATE}" "${db}" "${cache}"
++    [ -n "${TANGD_UPDATE}" ] && "${TANGD_UPDATE}" "${db}" "${cache}"
+ 
+     return 0
+ }
+@@ -322,6 +323,8 @@ tang_run() {
+     fi
+ 
+     local KEYS="${basedir}/cache"
++    [ -z "${TANGD_UPDATE}" ] && KEYS="${basedir}/db"
++
+     local inetd='--inetd'
+     [ "${SD_ACTIVATE##*/}" = "systemd-activate" ] && inetd=
+ 
+diff --git a/src/pins/tang/meson.build b/src/pins/tang/meson.build
+index f7d8226..ebcdd4a 100644
+--- a/src/pins/tang/meson.build
++++ b/src/pins/tang/meson.build
+@@ -12,14 +12,6 @@ kgen = find_program(
+   join_paths('/', 'usr', get_option('libexecdir'), 'tangd-keygen'),
+   required: false
+ )
+-updt = find_program(
+-  join_paths(libexecdir, 'tangd-update'),
+-  join_paths(get_option('prefix'), get_option('libdir'), 'tangd-update'),
+-  join_paths(get_option('prefix'), get_option('libexecdir'), 'tangd-update'),
+-  join_paths('/', 'usr', get_option('libdir'), 'tangd-update'),
+-  join_paths('/', 'usr', get_option('libexecdir'), 'tangd-update'),
+-  required: false
+-)
+ tang = find_program(
+   join_paths(libexecdir, 'tangd'),
+   join_paths(get_option('prefix'), get_option('libdir'), 'tangd'),
+@@ -35,11 +27,10 @@ if curl.found()
+   bins += join_paths(meson.current_source_dir(), 'clevis-encrypt-tang')
+   mans += join_paths(meson.current_source_dir(), 'clevis-encrypt-tang.1')
+ 
+-  if actv.found() and kgen.found() and updt.found() and tang.found()
++  if actv.found() and kgen.found() and tang.found()
+     env = environment()
+     env.set('SD_ACTIVATE', actv.path())
+     env.set('TANGD_KEYGEN', kgen.path())
+-    env.set('TANGD_UPDATE', updt.path())
+     env.set('TANGD', tang.path())
+     env.prepend('PATH',
+       join_paths(meson.source_root(), 'src'),
+diff --git a/src/pins/tang/pin-tang b/src/pins/tang/pin-tang
+index 98e5e4d..a63d0a2 100755
+--- a/src/pins/tang/pin-tang
++++ b/src/pins/tang/pin-tang
+@@ -31,8 +31,12 @@ mkdir -p "$TMP"/db
+ mkdir -p "$TMP"/cache
+ 
+ # Generate the server keys
++KEYS="$TMP"/db
+ "${TANGD_KEYGEN}" "$TMP"/db sig exc
+-"${TANGD_UPDATE}" "$TMP"/db "$TMP"/cache
++if which tangd-update; then
++    tangd-update "$TMP"/db "$TMP"/cache
++    KEYS="$TMP"/cache
++fi
+ 
+ # Start the server
+ port="$(shuf -i 1024-65536 -n 1)"
+@@ -40,13 +44,14 @@ port="$(shuf -i 1024-65536 -n 1)"
+ inetd='--inetd'
+ [ "${SD_ACTIVATE##*/}" = "systemd-activate" ] && inetd=
+ 
+-"$SD_ACTIVATE" $inetd -l 127.0.0.1:"$port" -a "$TANGD" "$TMP"/cache &
++"$SD_ACTIVATE" $inetd -l 127.0.0.1:"$port" -a "$TANGD" "$KEYS" &
+ PID=$!
+ sleep 0.25
+ 
+ thp="$(jose jwk thp -i "$TMP/db/sig.jwk")"
+-adv="$TMP/cache/default.jws"
+ url="http://localhost:${port}"
++adv="$TMP/adv"
++curl "$url/adv" -o "$adv"
+ 
+ cfg="$(printf '{"url":"%s","adv":"%s"}' "$url" "$adv")"
+ enc="$(echo -n "hi" | clevis encrypt tang "$cfg")"
+-- 
+2.18.4
+
