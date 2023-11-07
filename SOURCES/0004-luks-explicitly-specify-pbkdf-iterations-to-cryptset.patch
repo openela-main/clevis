@@ -1,0 +1,49 @@
+From 76ad9b21b61627a728bc9499821cf8e09446725d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Renaud=20M=C3=A9trich?= <rmetrich@redhat.com>
+Date: Thu, 21 Oct 2021 13:58:52 +0200
+Subject: [PATCH 4/4] luks: explicitly specify pbkdf iterations to cryptsetup
+
+This fixes an Out of memory error when the system has not much memory,
+such as a VM configured with 2GB currently being installed through the
+network (hence having ~1GB free memory only).
+See RHBZ #1979256 (https://bugzilla.redhat.com/show_bug.cgi?id=1979256).
+---
+ src/luks/clevis-luks-common-functions.in | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/luks/clevis-luks-common-functions.in b/src/luks/clevis-luks-common-functions.in
+index d53d2ab..360eb7e 100644
+--- a/src/luks/clevis-luks-common-functions.in
++++ b/src/luks/clevis-luks-common-functions.in
+@@ -760,10 +760,12 @@ clevis_luks_add_key() {
+         extra_args="$(printf -- '--key-file %s' "${KEYFILE}")"
+         input="$(printf '%s' "${NEWKEY}")"
+     fi
++    local pbkdf_args="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
+ 
+     printf '%s' "${input}" | cryptsetup luksAddKey --batch-mode \
+                                          --key-slot "${SLT}" \
+                                          "${DEV}" \
++                                         ${pbkdf_args} \
+                                          ${extra_args}
+ }
+ 
+@@ -792,11 +794,14 @@ clevis_luks_update_key() {
+         extra_args="$(printf -- '--key-file %s' "${KEYFILE}")"
+         input="$(printf '%s' "${NEWKEY}")"
+     fi
++    local pbkdf_args="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
+ 
+     if [ -n "${in_place}" ]; then
+         printf '%s' "${input}" | cryptsetup luksChangeKey "${DEV}" \
+                                             --key-slot "${SLT}" \
+-                                            --batch-mode ${extra_args}
++                                            --batch-mode \
++                                            ${pbkdf_args} \
++                                            ${extra_args}
+         return
+     fi
+ 
+-- 
+2.33.1
+

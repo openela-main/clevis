@@ -1,0 +1,42 @@
+--- clevis-18.ori/src/clevis.1.adoc	2021-04-15 13:00:19.965065700 +0200
++++ clevis-18/src/clevis.1.adoc	2023-01-13 12:08:31.162012856 +0100
+@@ -101,7 +101,7 @@
+ 
+ This command performs four steps:
+ 
+-1. Creates a new key with the same entropy as the LUKS master key.
++1. Creates a new key with the same entropy as the LUKS master key -- maximum entropy bits is 256.
+ 2. Encrypts the new key with Clevis.
+ 3. Stores the Clevis JWE in the LUKS header.
+ 4. Enables the new key for use with LUKS.
+--- clevis-18.ori/src/luks/clevis-luks-bind.1.adoc	2023-01-13 12:02:52.005243591 +0100
++++ clevis-18/src/luks/clevis-luks-bind.1.adoc	2023-01-13 12:08:05.873955501 +0100
+@@ -20,7 +20,7 @@
+ 
+ This command performs four steps:
+ 
+-1. Creates a new key with the same entropy as the LUKS master key.
++1. Creates a new key with the same entropy as the LUKS master key -- maximum entropy bits is 256.
+ 2. Encrypts the new key with Clevis.
+ 3. Stores the Clevis JWE in the LUKS header.
+ 4. Enables the new key for use with LUKS.
+--- clevis-18.ori/src/luks/clevis-luks-common-functions.in	2023-01-13 12:02:52.005243591 +0100
++++ clevis-18/src/luks/clevis-luks-common-functions.in	2023-01-13 12:06:29.233736316 +0100
+@@ -875,6 +875,7 @@
+     [ -z "${DEV}" ] && return 1
+ 
+     local dump filter bits
++    local MAX_ENTROPY_BITS=256 # Maximum allowed by pwmake.
+     dump=$(cryptsetup luksDump "${DEV}")
+     if cryptsetup isLuks --type luks1 "${DEV}"; then
+         filter="$(echo "${dump}" | sed -rn 's|MK bits:[ \t]*([0-9]+)|\1|p')"
+@@ -886,6 +887,9 @@
+     fi
+ 
+     bits="$(echo -n "${filter}" | sort -n | tail -n 1)"
++    if [ "${bits}" -gt "${MAX_ENTROPY_BITS}" ]; then
++        bits="${MAX_ENTROPY_BITS}"
++    fi
+     pwmake "${bits}"
+ }
+ 

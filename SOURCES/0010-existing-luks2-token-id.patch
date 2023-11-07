@@ -1,0 +1,385 @@
+--- clevis-18.ori/src/luks/clevis-luks-bind	2021-04-15 13:00:19.965065700 +0200
++++ clevis-18/src/luks/clevis-luks-bind	2022-11-24 12:53:59.613676320 +0100
+@@ -25,7 +25,7 @@
+ usage() {
+     exec >&2
+     echo
+-    echo "Usage: clevis luks bind [-y] [-f] [-s SLT] [-k KEY] [-t TOKEN_ID] -d DEV PIN CFG"
++    echo "Usage: clevis luks bind [-y] [-f] [-s SLT] [-k KEY] [-t TOKEN_ID] [-e EXISTING_TOKEN_ID] -d DEV PIN CFG"
+     echo
+     echo "$SUMMARY":
+     echo
+@@ -42,6 +42,8 @@
+     echo "  -k KEY       Non-interactively read LUKS password from KEY file"
+     echo "  -k -         Non-interactively read LUKS password from standard input"
+     echo
++    echo "  -e E_TKN_ID  Existing LUKS token ID for existing passphrase; only available for LUKS2"
++    echo
+     exit 2
+ }
+ 
+@@ -52,13 +54,14 @@
+ 
+ FRC=
+ YES=
+-while getopts ":hfyd:s:k:t:" o; do
++while getopts ":hfyd:s:k:t:e:" o; do
+     case "$o" in
+     f) FRC='-f';;
+     d) DEV="$OPTARG";;
+     s) SLT="$OPTARG";;
+     k) KEY="$OPTARG";;
+     t) TOKEN_ID="$OPTARG";;
++    e) EXISTING_TOKEN_ID="$OPTARG";;
+     y) FRC='-f'
+        YES='-y';;
+     *) usage;;
+@@ -99,11 +102,20 @@
+     exit 1
+ fi
+ 
++if [ -n "${EXISTING_TOKEN_ID}" ] && ! clevis_luks_luks2_existing_token_id_supported; then
++    echo "Existing token ID not supported in this cryptsetup version" >&2
++    exit 1
++fi
++
+ # Get the existing passphrase/keyfile.
+ existing_key=
+ keyfile=
+ case "${KEY}" in
+-"") IFS= read -r -s -p "Enter existing LUKS password: " existing_key; echo >&2;;
++ "")
++    if [ -z "${EXISTING_TOKEN_ID}" ] ; then
++        IFS= read -r -s -p "Enter existing LUKS password: " existing_key; echo >&2
++    fi
++    ;;
+  -) IFS= read -r -s -p "" existing_key ||:
+     if [ "${luks_type}" = "luks1" ] && ! luksmeta test -d "${DEV}" \
+                                     && [ -z "${FRC}" ]; then
+@@ -119,6 +131,13 @@
+     ;;
+ esac
+ 
++# Check if existing token id for keyring read is provided
++# If so, keyfile is not allowed
++if [ -n "${EXISTING_TOKEN_ID}" ] && [ -n "${keyfile}" ] ; then
++    echo "Cannot specify kernel keyring description together with key file" >&2
++    exit 1
++fi
++
+ # If necessary, initialize the LUKS volume.
+ if [ "${luks_type}" = "luks1" ] && ! luksmeta test -d "${DEV}"; then
+     luksmeta init -d "${DEV}" ${FRC}
+@@ -127,7 +146,7 @@
+ if ! clevis_luks_do_bind "${DEV}" "${SLT}" "${TOKEN_ID}" \
+                          "${PIN}" "${CFG}" \
+                          "${YES}" "" \
+-                         "${existing_key}" "${keyfile}"; then
++                         "${existing_key}" "${keyfile}" "${EXISTING_TOKEN_ID}"; then
+     echo "Error adding new binding to ${DEV}" >&2
+     exit 1
+ fi
+--- clevis-18.ori/src/luks/clevis-luks-bind.1.adoc	2021-04-15 13:00:19.965065700 +0200
++++ clevis-18/src/luks/clevis-luks-bind.1.adoc	2022-11-24 12:54:48.476829197 +0100
+@@ -9,7 +9,7 @@
+ 
+ == SYNOPSIS
+ 
+-*clevis luks bind* [-f] [-y] -d DEV [-t TKN_ID] [-s SLT] [-k KEY] PIN CFG
++*clevis luks bind* [-f] [-y] -d DEV [-t TKN_ID] [-s SLT] [-k KEY] [-e EXISTING_TOKEN_ID] PIN CFG
+ 
+ == OVERVIEW
+ 
+@@ -54,6 +54,12 @@
+ * *-k* - :
+   Non-interactively read LUKS password from standard input
+ 
++* *-e* _E_TKN_ID_ :
++  LUKS token ID for existing passphrase; only available for LUKS2.
++  This parameter allows providing a configured token ID in LUKS2
++  containing the existing passphrase for this device, so that
++  existing passphrase is not prompted by clevis
++
+ == CAVEATS
+ 
+ This command does not change the LUKS master key. This implies that if you
+--- clevis-18.ori/src/luks/clevis-luks-common-functions.in	2022-11-24 12:46:09.130204312 +0100
++++ clevis-18/src/luks/clevis-luks-common-functions.in	2022-11-24 13:01:57.087170193 +0100
+@@ -307,9 +307,10 @@
+     local KEY="${2:-}"
+     local KEYFILE="${3:-}"
+     local SLT="${4:-}"
++    local EXISTING_TOKEN_ID="${5:-}"
+ 
+     [ -z "${DEV}" ] && return 1
+-    [ -z "${KEYFILE}" ] && [ -z "${KEY}" ] && return 1
++    [ -z "${EXISTING_TOKEN_ID}" ] && [ -z "${KEYFILE}" ] && [ -z "${KEY}" ] && return 1
+ 
+     local extra_args
+     extra_args="$([ -n "${SLT}" ] && printf -- '--key-slot %s' "${SLT}")"
+@@ -318,6 +319,11 @@
+                    ${extra_args}
+         return
+     fi
++    if [ -n "${EXISTING_TOKEN_ID}" ]; then
++        cryptsetup open --test-passphrase "${DEV}" --token-id "${EXISTING_TOKEN_ID}" \
++                   ${extra_args}
++        return
++    fi
+ 
+     printf '%s' "${KEY}" | cryptsetup open --test-passphrase "${DEV}" \
+                                       ${extra_args}
+@@ -753,10 +759,11 @@
+     local NEWKEY="${3}"
+     local KEY="${4}"
+     local KEYFILE="${5:-}"
++    local EXISTING_TOKEN_ID="${6:-}"
+ 
+     [ -z "${DEV}" ] && return 1
+     [ -z "${NEWKEY}" ] && return 1
+-    [ -z "${KEY}" ] && [ -z "${KEYFILE}" ] && return 1
++    [ -z "${EXISTING_TOKEN_ID}" ] && [ -z "${KEY}" ] && [ -z "${KEYFILE}" ] && return 1
+ 
+     local extra_args='' input
+     input="$(printf '%s\n%s' "${KEY}" "${NEWKEY}")"
+@@ -764,6 +771,10 @@
+         extra_args="$(printf -- '--key-file %s' "${KEYFILE}")"
+         input="$(printf '%s' "${NEWKEY}")"
+     fi
++    if [ -n "${EXISTING_TOKEN_ID}" ]; then
++        extra_args="$(printf -- '--token-id %s' "${EXISTING_TOKEN_ID}")"
++        input="$(printf '%s' "${NEWKEY}")"
++    fi
+     local pbkdf_args="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
+ 
+     printf '%s' "${input}" | cryptsetup luksAddKey --batch-mode \
+@@ -780,6 +791,7 @@
+     local NEWKEY="${3}"
+     local KEY="${4}"
+     local KEYFILE="${5:-}"
++    local EXISTING_TOKEN_ID="${6:-}"
+ 
+     [ -z "${DEV}" ] && return 1
+     [ -z "${NEWKEY}" ] && return 1
+@@ -789,7 +801,7 @@
+     local in_place
+     clevis_luks_check_valid_key_or_keyfile "${DEV}" \
+                                            "${KEY}" "${KEYFILE}" \
+-                                           "${SLT}" 2>/dev/null \
++                                           "${SLT}" "${EXISTING_TOKEN_ID}" 2>/dev/null \
+                                            && in_place=true
+ 
+     local input extra_args=
+@@ -798,6 +810,10 @@
+         extra_args="$(printf -- '--key-file %s' "${KEYFILE}")"
+         input="$(printf '%s' "${NEWKEY}")"
+     fi
++    if [ -n "${EXISTING_TOKEN_ID}" ]; then
++        extra_args="$(printf -- '--token-id %s' "${EXISTING_TOKEN_ID}")"
++        input="$(printf '%s' "${NEWKEY}")"
++    fi
+     local pbkdf_args="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
+ 
+     if [ -n "${in_place}" ]; then
+@@ -844,13 +860,13 @@
+         [ -n "${OVERWRITE}" ] || return 1
+ 
+         clevis_luks_update_key "${DEV}" "${SLT}" \
+-                               "${NEWKEY}" "${KEY}" "${KEYFILE}"
++                               "${NEWKEY}" "${KEY}" "${KEYFILE}" "${EXISTING_TOKEN_ID}"
+         return
+     fi
+ 
+     # Add a new key.
+     clevis_luks_add_key "${DEV}" "${SLT}" \
+-                        "${NEWKEY}" "${KEY}" "${KEYFILE}"
++                        "${NEWKEY}" "${KEY}" "${KEYFILE}" "${EXISTING_TOKEN_ID}"
+ }
+ 
+ # clevis_luks_generate_key() generates a new key for use with clevis.
+@@ -942,6 +958,7 @@
+     local OVERWRITE="${7:-}"
+     local KEY="${8:-}"
+     local KEYFILE="${9:-}"
++    local EXISTING_TOKEN_ID="${10:-}"
+ 
+     [ -z "${DEV}" ] && return 1
+     [ -z "${PIN}" ] && return 1
+@@ -951,6 +968,8 @@
+     if ! clevis_luks_check_valid_key_or_keyfile "${DEV}" \
+                                                 "${KEY}" \
+                                                 "${KEYFILE}" \
++                                                "" \
++                                                "${EXISTING_TOKEN_ID}" \
+                     && ! KEY="$(clevis_luks_get_existing_key "${DEV}" \
+                                 "Enter existing LUKS password: " \
+                                 "recover")"; then
+@@ -995,7 +1014,7 @@
+ 
+     if ! clevis_luks_save_key_to_slot "${DEV}" "${SLT}" \
+                                       "${newkey}" "${KEY}" "${KEYFILE}" \
+-                                      "${OVERWRITE}"; then
++                                      "${OVERWRITE}" "${EXISTING_TOKEN_ID}"; then
+         echo "Unable to save/update key slot; operation cancelled" >&2
+         clevis_luks_restore_dev "${CLEVIS_TMP_DIR}" || :
+         rm -rf "${CLEVIS_TMP_DIR}"
+@@ -1016,12 +1035,19 @@
+ }
+ 
+ # clevis_luks_luks2_supported() indicates whether we support LUKS2 devices.
+-# Suppor is determined at build time.
++# Support is determined at build time.
+ function clevis_luks_luks2_supported() {
+     # We require cryptsetup >= 2.0.4 to fully support LUKSv2.
+     return @OLD_CRYPTSETUP@
+ }
+ 
++# clevis_luks_luks2_existing_token_id_supported() indicates whether
++# cryptsetup allows token id for passphrase providing
++function clevis_luks_luks2_existing_token_id_supported() {
++    # We require cryptsetup >= 2.6.0 to fully support LUKSv2 addkey/open by token ID
++    return @OLD_CRYPTSETUP_EXISTING_TOKEN_ID@
++}
++
+ # clevis_luks_type() returns the LUKS type of a device, e.g. "luks1".
+ clevis_luks_type() {
+     local DEV="${1}"
+--- clevis-18.ori/src/luks/meson.build	2021-04-15 13:00:19.965065700 +0200
++++ clevis-18/src/luks/meson.build	2022-11-24 13:02:39.118301695 +0100
+@@ -14,6 +14,15 @@
+     endif
+ endif
+ 
++libcryptsetup_ext_token_id = dependency('libcryptsetup', version: '>=2.6.0', required: false)
++if libcryptsetup_ext_token_id.found()
++    luksmeta_data.set('OLD_CRYPTSETUP_EXISTING_TOKEN_ID', '0')
++    message('cryptsetup version supports existing token id')
++else
++    luksmeta_data.set('OLD_CRYPTSETUP_EXISTING_TOKEN_ID', '1')
++     warning('cryptsetup version does not support existing token id')
++endif
++                
+ clevis_luks_common_functions = configure_file(
+   input: 'clevis-luks-common-functions.in',
+   output: 'clevis-luks-common-functions',
+--- clevis-18.ori/src/luks/tests/bind-luks2-ext-token	1970-01-01 01:00:00.000000000 +0100
++++ clevis-18/src/luks/tests/bind-luks2-ext-token	2022-11-24 13:04:30.742650939 +0100
+@@ -0,0 +1,74 @@
++#!/bin/bash -ex
++# vim: set tabstop=8 shiftwidth=4 softtabstop=4 expandtab smarttab colorcolumn=80:
++#
++# Copyright (c) 2022 Red Hat, Inc.
++# Author: Sergio Arroutbi <sarroutb@redhat.com>
++#
++# This program is free software: you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation, either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++#
++
++TEST=$(basename "${0}")
++. tests-common-functions
++
++on_exit() {
++    [ -d "${TMP}" ] && rm -rf "${TMP}"
++}
++
++create_existing_token_id_from_keyring() {
++    local DEV="${1}"
++    local KEYDESC="${2}"
++    local TOKEN_ID="${3}"
++    local PASS="${4}"
++    if [[ -z "${DEV}" ]] || [[ -z "${KEYDESC}" ]] || [[ -z "${TOKEN_ID}" ]]; then
++        return 1
++    fi
++    KEYRING_ID=$(keyctl add user "${KEYDESC}" "${PASS}" @s)
++    keyctl print "${KEYRING_ID}" 2>/dev/null 1>/dev/null
++    cryptsetup token add --token-id "${TOKEN_ID}" --key-description "${KEYDESC}" "${DEV}"
++}
++
++if ! luks2_supported; then
++    skip_test "${TEST}: LUKS2 is not supported."
++fi
++
++if  ! luks2_existing_token_id_supported; then
++    skip_test "${TEST}: Existing token ID not supported"
++fi
++
++trap 'on_exit' EXIT
++trap 'exit' ERR
++
++TMP="$(mktemp -d)"
++
++ADV="${TMP}/adv.jws"
++tang_create_adv "${TMP}" "${ADV}"
++CFG="$(printf '{"url":"foobar","adv":"%s"}' "$ADV")"
++
++EXISTING_TOKEN_ID=5
++KEYDESC="testkey"
++PASS="123exttokenid_"
++DEV="${TMP}/luks2-device-ext-token"
++new_device "luks2" "${DEV}" "${PASS}"
++
++create_existing_token_id_from_keyring "${DEV}" "${KEYDESC}" "${EXISTING_TOKEN_ID}" "${PASS}"
++
++if ! clevis luks bind -y -d "${DEV}" -e "${EXISTING_TOKEN_ID}" tang "${CFG}"; then
++    error "${TEST}: Binding expected to succeed with existing token id:${EXISTING_TOKEN_ID}" >&2
++fi
++
++KEYFILE="${TMP}/keyfile.txt"
++touch "${KEYFILE}"
++if clevis luks bind -y -d "${DEV}" -e "${EXISTING_TOKEN_ID}" -k "${KEYFILE}" tang "${CFG}"; then
++    error "${TEST}: Using existing token id and keyfile should dump an error" >&2
++fi
+--- clevis-18.ori/src/luks/tests/meson.build	2021-04-15 13:00:19.967066500 +0200
++++ clevis-18/src/luks/tests/meson.build	2022-11-24 13:06:36.096043131 +0100
+@@ -5,6 +5,15 @@
+ # given token slot.
+ cryptsetup = find_program('cryptsetup', required: true)
+ 
++# Use keyctl to check an existing token id can be created from
++# kernel keyring password
++keyutils = find_program('keyctl', required: false)
++if keyutils.found()
++    message('keyutils installed')
++else
++    warning('keyutils not installed, unable to test existing token id binding')
++endif
++
+ common_functions = configure_file(input: 'tests-common-functions.in',
+   output: 'tests-common-functions',
+   configuration: luksmeta_data,
+@@ -69,6 +78,10 @@
+   test('unbind-unbound-slot-luks2', find_program('unbind-unbound-slot-luks2'), env: env)
+   test('unbind-luks2', find_program('unbind-luks2'), env: env, timeout: 60)
+ 
++  if keyutils.found() and luksmeta_data.get('OLD_CRYPTSETUP_EXISTING_TOKEN_ID') == '0'
++    test('bind-luks2-ext-token', find_program('bind-luks2-ext-token'), env: env, timeout: 60)
++  endif
++
+   if jq.found()
+     test('list-recursive-luks2', find_program('list-recursive-luks2'), env: env, timeout: 60)
+     test('list-tang-luks2', find_program('list-tang-luks2'), env: env, timeout: 60)
+--- clevis-18.ori/src/luks/tests/tests-common-functions.in	2021-04-15 13:00:19.967066500 +0200
++++ clevis-18/src/luks/tests/tests-common-functions.in	2022-11-24 13:06:24.376006462 +0100
+@@ -36,6 +36,12 @@
+     return @OLD_CRYPTSETUP@
+ }
+ 
++# We require cryptsetup >= 2.6.0 to fully support LUKSv2 addkey/open by token ID
++# Support is determined at build time.
++luks2_existing_token_id_supported() {
++    return @OLD_CRYPTSETUP_EXISTING_TOKEN_ID@
++}
++
+ # Creates a new LUKS1 or LUKS2 device to be used.
+ new_device() {
+     local LUKS="${1}"
