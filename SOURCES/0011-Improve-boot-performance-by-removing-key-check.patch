@@ -1,0 +1,53 @@
+From 51ae4f94a4955d9f06955ccd5a8b396b01c80d48 Mon Sep 17 00:00:00 2001
+From: Sergio Arroutbi <sarroutb@redhat.com>
+Date: Tue, 2 Aug 2022 11:07:00 -0300
+Subject: [PATCH] Improve boot performance by removing key check
+
+---
+ src/luks/clevis-luks-common-functions | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/src/luks/clevis-luks-common-functions b/src/luks/clevis-luks-common-functions
+index 038cc37..950f217 100644
+--- a/src/luks/clevis-luks-common-functions
++++ b/src/luks/clevis-luks-common-functions
+@@ -328,6 +328,7 @@ clevis_luks_check_valid_key_or_keyfile() {
+ clevis_luks_unlock_device_by_slot() {
+     local DEV="${1}"
+     local SLT="${2}"
++    local SKIP_CHECK="${3}"
+ 
+     [ -z "${DEV}" ] && return 1
+     [ -z "${SLT}" ] && return 1
+@@ -343,7 +344,9 @@ clevis_luks_unlock_device_by_slot() {
+         return 1
+     fi
+ 
+-    clevis_luks_check_valid_key_or_keyfile "${DEV}" "${passphrase}" || return 1
++    if [ -z "${SKIP_CHECK}" ]; then
++        clevis_luks_check_valid_key_or_keyfile "${DEV}" "${passphrase}" || return 1
++    fi
+     printf '%s' "${passphrase}"
+ }
+ 
+@@ -351,6 +354,8 @@ clevis_luks_unlock_device_by_slot() {
+ # parameter and returns the decoded passphrase.
+ clevis_luks_unlock_device() {
+     local DEV="${1}"
++    local SKIP_CHECK="YES"
++
+     [ -z "${DEV}" ] && return 1
+ 
+     local used_slots
+@@ -361,7 +366,7 @@ clevis_luks_unlock_device() {
+ 
+     local slt pt
+     for slt in ${used_slots}; do
+-        if ! pt=$(clevis_luks_unlock_device_by_slot "${DEV}" "${slt}") \
++        if ! pt=$(clevis_luks_unlock_device_by_slot "${DEV}" "${slt}" "${SKIP_CHECK}") \
+                   || [ -z "${pt}" ]; then
+              continue
+         fi
+-- 
+2.35.1
+

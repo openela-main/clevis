@@ -1,0 +1,26 @@
+From da17589f0706b27690a11484165fd58dea1a5eb1 Mon Sep 17 00:00:00 2001
+From: Sergio Correia <scorreia@redhat.com>
+Date: Thu, 25 Nov 2021 19:18:03 -0300
+Subject: [PATCH 5/5] Stop sending stderr to the void when decryption doesn't
+ happen
+
+---
+ src/luks/clevis-luks-common-functions | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/luks/clevis-luks-common-functions b/src/luks/clevis-luks-common-functions
+index 879ca4c..df8e16d 100644
+--- a/src/luks/clevis-luks-common-functions
++++ b/src/luks/clevis-luks-common-functions
+@@ -323,7 +323,7 @@ clevis_luks_unlock_device_by_slot() {
+         return 1
+     fi
+ 
+-    if ! passphrase="$(printf '%s' "${jwe}" | clevis decrypt 2>/dev/null)" \
++    if ! passphrase="$(printf '%s' "${jwe}" | clevis decrypt)" \
+                        || [ -z "${passphrase}" ]; then
+         return 1
+     fi
+-- 
+2.33.1
+

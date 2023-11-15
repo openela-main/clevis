@@ -1,0 +1,16 @@
+--- clevis-15-ori/src/pins/tang/clevis-decrypt-tang	2020-10-28 19:55:47.673228700 +0100
++++ clevis-15/src/pins/tang/clevis-decrypt-tang	2022-01-21 10:37:40.327825491 +0100
+@@ -73,10 +73,10 @@
+ 
+ xfr="$(jose jwk exc -i '{"alg":"ECMR"}' -l- -r- <<< "$clt$eph")"
+ 
+-url="$url/rec/$kid"
++rec_url="$url/rec/$kid"
+ ct="Content-Type: application/jwk+json"
+-if ! rep="$(curl -sfg -X POST -H "$ct" --data-binary @- "$url" <<< "$xfr")"; then
+-    echo "Error communicating with the server!" >&2
++if ! rep="$(curl -sfg -X POST -H "$ct" --data-binary @- "$rec_url" <<< "$xfr")"; then
++    echo "Error communicating with the server $url" >&2
+     exit 1
+ fi
+ 

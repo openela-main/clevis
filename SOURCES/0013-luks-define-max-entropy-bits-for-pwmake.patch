@@ -1,0 +1,73 @@
+--- clevis-15.ori/src/clevis.1.adoc	2020-10-28 19:55:47.663228800 +0100
++++ clevis-15/src/clevis.1.adoc	2023-01-11 17:18:29.967295005 +0100
+@@ -101,7 +101,7 @@
+ 
+ This command performs four steps:
+ 
+-1. Creates a new key with the same entropy as the LUKS master key.
++1. Creates a new key with the same entropy as the LUKS master key -- maximum entropy bits is 256.
+ 2. Encrypts the new key with Clevis.
+ 3. Stores the Clevis JWE in the LUKS header.
+ 4. Enables the new key for use with LUKS.
+--- clevis-15.ori/src/luks/clevis-luks-bind.1.adoc	2020-10-28 19:55:47.663228800 +0100
++++ clevis-15/src/luks/clevis-luks-bind.1.adoc	2023-01-11 17:18:55.239351209 +0100
+@@ -20,7 +20,7 @@
+ 
+ This command performs four steps:
+ 
+-1. Creates a new key with the same entropy as the LUKS master key.
++1. Creates a new key with the same entropy as the LUKS master key -- maximum entropy bits is 256.
+ 2. Encrypts the new key with Clevis.
+ 3. Stores the Clevis JWE in the LUKS header.
+ 4. Enables the new key for use with LUKS.
+--- clevis-15.ori/src/luks/clevis-luks-common-functions	2023-01-11 17:15:44.984928070 +0100
++++ clevis-15/src/luks/clevis-luks-common-functions	2023-01-11 17:20:53.238613637 +0100
+@@ -865,6 +865,7 @@
+     [ -z "${DEV}" ] && return 1
+ 
+     local dump filter bits
++    local MAX_ENTROPY_BITS=256
+     dump=$(cryptsetup luksDump "${DEV}")
+     if cryptsetup isLuks --type luks1 "${DEV}"; then
+         filter="$(echo "${dump}" | sed -rn 's|MK bits:[ \t]*([0-9]+)|\1|p')"
+@@ -876,6 +877,9 @@
+     fi
+ 
+     bits="$(echo -n "${filter}" | sort -n | tail -n 1)"
++    if [ "${bits}" -gt "${MAX_ENTROPY_BITS}" ]; then
++        bits="${MAX_ENTROPY_BITS}"
++    fi
+     pwmake "${bits}"
+ }
+
+--- clevis-15.ori/src/luks/clevis-luks-bind.in	2023-01-11 17:15:44.815927694 +0100
++++ clevis-15/src/luks/clevis-luks-bind.in	2023-01-12 16:20:30.266404993 +0100
+@@ -19,6 +19,8 @@
+ # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #
+ 
++. clevis-luks-common-functions
++
+ SUMMARY="Binds a LUKS device using the specified policy"
+ UUID=cb6e8904-81ff-40da-a84a-07ab9ab5715e
+ 
+@@ -139,14 +141,11 @@
+ fi
+ 
+ # Generate a key with the same entropy as the LUKS Master Key
+-key="$(pwmake "$(
+-cryptsetup luksDump "$DEV" \
+-    | if [ "$luks_type" == "luks1" ]; then
+-        sed -rn 's|MK bits:[ \t]*([0-9]+)|\1|p'
+-    else
+-        sed -rn 's|^\s+Key:\s+([0-9]+) bits\s*$|\1|p'
+-    fi | sort -n | tail -n 1
+-)")"
++if ! key="$(clevis_luks_generate_key "${DEV}")" \
++     || [ -z "${key}" ]; then
++    echo "Unable to generate key for ${DEV}" >&2
++    return 1
++fi
+ 
+ # Encrypt the new key
+ jwe="$(echo -n "$key" | clevis encrypt "$PIN" "$CFG" "${YES}")"
