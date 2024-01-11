@@ -1,0 +1,45 @@
+From 0654fd3f3fd1ebc080cb1140774120d8f392137b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Renaud=20M=C3=A9trich?=
+ <1163635+rmetrich@users.noreply.github.com>
+Date: Wed, 1 Dec 2021 09:37:35 -0300
+Subject: [PATCH] luks: enable debugging in clevis scripts when rd.debug is set
+ (#340)
+
+On Fedora/RHEL, the rd.debug kernel command line parameter controls
+debugging.
+By implementing the functionality inside clevis, troubleshooting will be
+greatly eased.
+See RHBZ #1980742 (https://bugzilla.redhat.com/show_bug.cgi?id=1980742).
+---
+ src/luks/clevis-luks-common-functions.in | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/luks/clevis-luks-common-functions.in b/src/luks/clevis-luks-common-functions.in
+index d059aae..87b370f 100644
+--- a/src/luks/clevis-luks-common-functions.in
++++ b/src/luks/clevis-luks-common-functions.in
+@@ -20,6 +20,21 @@
+ 
+ CLEVIS_UUID="cb6e8904-81ff-40da-a84a-07ab9ab5715e"
+ 
++enable_debugging() {
++    # Automatically enable debugging if in initramfs phase and rd.debug
++    if [ -e /usr/lib/dracut-lib.sh ]; then
++        local bashopts=$-
++        # Because dracut is loosely written, disable hardening options temporarily
++        [[ $bashopts != *u* ]] || set +u
++        [[ $bashopts != *e* ]] || set +e
++        . /usr/lib/dracut-lib.sh
++        [[ $bashopts != *u* ]] || set -u
++        [[ $bashopts != *e* ]] || set -e
++    fi
++}
++
++enable_debugging
++
+ # valid_slot() will check whether a given slot is possibly valid, i.e., if it
+ # is a numeric value within the specified range.
+ valid_slot() {
+-- 
+2.35.1
+
