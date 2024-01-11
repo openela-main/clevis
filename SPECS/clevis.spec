@@ -2,7 +2,7 @@
 
 Name:           clevis
 Version:        15
-Release:        14%{?dist}
+Release:        15%{?dist}
 Summary:        Automated decryption framework
 
 License:        GPLv3+
@@ -23,6 +23,7 @@ Patch0011: 0011-Improve-boot-performance-by-removing-key-check.patch
 Patch0012: 0012-ignore-empty-and-comment-lines-in-crypttab.patch
 Patch0013: 0013-luks-define-max-entropy-bits-for-pwmake.patch
 Patch0014: 0014-luks-edit-remove-unnecessary-redirection.patch
+Patch0015: 0015-support-sha256-algorithm.patch
 
 BuildRequires:  git
 BuildRequires:  gcc
@@ -203,6 +204,10 @@ systemctl preset %{name}-luks-askpass.path >/dev/null 2>&1 || :
 %attr(4755, root, root) %{_libexecdir}/%{name}-luks-udisks2
 
 %changelog
+* Tue May 23 2023 Sergio Arroutbi <sarroutb@redhat.com> - 15-15
+- Include SHA-256 thumbprints clevis support
+  Resolves: rhbz#2209058
+
 * Mon Jan 16 2023 Sergio Arroutbi <sarroutb@redhat.com> - 15-14
 - luks-edit: remove unnecessary 2>/dev/null
   Resolves: rhbz#2159739

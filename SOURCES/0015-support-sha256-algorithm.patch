@@ -1,0 +1,219 @@
+--- clevis-15.ori/src/pins/tang/clevis-decrypt-tang	2023-05-23 11:29:59.717465656 +0200
++++ clevis-15/src/pins/tang/clevis-decrypt-tang	2023-05-23 11:49:02.950511503 +0200
+@@ -50,12 +50,30 @@
+     exit 1
+ fi
+ 
+-if ! srv="$(jose fmt -j- -Og clevis -g tang -g adv -Oo- <<< "$jhd" \
+-        | jose jwk thp -i- -f "$kid")"; then
++if ! keys="$(jose fmt -j- -Og clevis -g tang -g adv -Oo- <<< "${jhd}")"; then
+     echo "JWE missing required 'clevis.tang.adv' header parameter!" >&2
+     exit 1
+ fi
+ 
++# Check if the thumbprint we have in `kid' is in the advertised keys.
++CLEVIS_DEFAULT_THP_ALG=S1        # SHA-1
++CLEVIS_ALTERNATIVE_THP_ALGS=S256 # SHA-256
++
++if ! srv="$(jose jwk thp -i- -f "${kid}" -a "${CLEVIS_DEFAULT_THP_ALG}" \
++            <<< "${keys}")"; then
++    # `kid' thumprint not in the advertised keys, but it's possible it was
++    # generated using a different algorithm than the default one.
++    # Let us try the alternative supported algorithms to make sure `kid'
++    # really is not part of the advertised keys.
++    for alg in ${CLEVIS_ALTERNATIVE_THP_ALGS}; do
++        srv="$(jose jwk thp -i- -f "$kid" -a "${alg}" <<< "${keys}")" && break
++    done
++    if [ -z "${srv}" ]; then
++        echo "JWE header validation of 'clevis.tang.adv' failed: key thumbprint does not match" >&2
++        exit 1
++    fi
++fi
++
+ if ! url="$(jose fmt -j- -Og clevis -g tang -g url -Su- <<< "$jhd")"; then
+     echo "JWE missing required 'clevis.tang.url' header parameter!" >&2
+     exit 1
+--- clevis-15.ori/src/pins/tang/clevis-encrypt-tang	2020-10-28 19:55:47.673228700 +0100
++++ clevis-15/src/pins/tang/clevis-encrypt-tang	2023-05-23 15:15:18.440099403 +0200
+@@ -64,6 +64,9 @@
+     exit 1
+ fi
+ 
++CLEVIS_DEFAULT_THP_ALG=S1        # SHA-1
++CLEVIS_ALTERNATIVE_THP_ALGS=S256 # SHA-256
++
+ trust=
+ [ -n "${2}" ] && [ "${2}" == "-y" ] && trust=yes
+ 
+@@ -111,15 +114,24 @@
+     if [ -z "$thp" ]; then
+         echo "The advertisement contains the following signing keys:" >&2
+         echo >&2
+-        jose jwk thp -i- <<< "$ver" >&2
++	jose jwk thp -i- -a "${CLEVIS_DEFAULT_THP_ALG}" <<< "$ver" >&2
+         echo >&2
+         read -r -p "Do you wish to trust these keys? [ynYN] " ans < /dev/tty
+         [[ "$ans" =~ ^[yY]$ ]] || exit 1
+-
+     elif [ "$thp" != "any" ] && \
+-        ! jose jwk thp -i- -f "$thp" -o /dev/null <<< "$ver"; then
+-        echo "Trusted JWK '$thp' did not sign the advertisement!" >&2
+-        exit 1
++        ! jose jwk thp -i- -f "${thp}" -o /dev/null -a "${CLEVIS_DEFAULT_THP_ALG}" \
++          <<< "$ver"; then
++        # Thumbprint of trusted JWK did not match the signature. Let's check
++        # alternative thumbprints generated with clevis supported hash
++        # algorithms to be sure.
++        for alg in ${CLEVIS_ALTERNATIVE_THP_ALGS}; do
++            srv="$(jose jwk thp -i- -f "${thp}" -a "${alg}" <<< "${ver}")" \
++                   && break
++        done
++        if [ -z "${srv}" ]; then
++            echo "Trusted JWK '$thp' did not sign the advertisement!" >&2
++            exit 1
++        fi
+     fi
+ fi
+ 
+@@ -138,7 +150,7 @@
+ 
+ jwk="$(jose fmt -j- -Od key_ops -o- <<< "$jwk")"
+ jwk="$(jose fmt -j- -Od alg -o- <<< "$jwk")"
+-kid="$(jose jwk thp -i- <<< "$jwk")"
++kid="$(jose jwk thp -i- -a "${CLEVIS_DEFAULT_THP_ALG}"  <<< "$jwk")"
+ jwe='{"protected":{"alg":"ECDH-ES","enc":"A256GCM","clevis":{"pin":"tang","tang":{}}}}'
+ jwe="$(jose fmt -j "$jwe" -g protected -q "$kid" -s kid -UUo-)"
+ jwe="$(jose fmt -j "$jwe" -g protected -g clevis -g tang -q "$url" -s url -UUUUo-)"
+--- clevis-15.ori/src/luks/tests/meson.build	2023-05-23 11:29:59.594464890 +0200
++++ clevis-15/src/luks/tests/meson.build	2023-05-23 12:00:10.811482757 +0200
+@@ -113,6 +113,7 @@
+     test('report-sss-luks2', find_program('report-sss-luks2'), env: env, timeout: 120)
+     test('edit-tang-luks2', find_program('edit-tang-luks2'), env: env, timeout: 210)
+     test('pass-tang-luks2', find_program('pass-tang-luks2'), env: env, timeout: 60)
++    test('default-thp-alg', find_program('default-thp-alg'), env: env)
+   endif
+ 
+ test('backup-restore-luks2', find_program('backup-restore-luks2'), env: env, timeout: 120)
+--- clevis-15.ori/src/luks/tests/default-thp-alg	1970-01-01 01:00:00.000000000 +0100
++++ clevis-15/src/luks/tests/default-thp-alg	2023-05-23 16:09:21.920385994 +0200
+@@ -0,0 +1,120 @@
++#!/bin/bash
++set -exo pipefail
++# vim: set ts=8 shiftwidth=4 softtabstop=4 expandtab smarttab colorcolumn=80:
++#
++# Copyright (c) 2020 Red Hat, Inc.
++# Author: Sergio Correia <scorreia@redhat.com>
++#
++# This program is free software: you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation, either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++
++. tests-common-functions
++
++TEST=$(basename "${0}")
++
++on_exit() {
++    exit_status=$?
++    tang_stop "${TMP}"
++    [ -d "${TMP}" ] && rm -rf "${TMP}"
++    exit "${exit_status}"
++}
++
++trap 'on_exit' EXIT
++
++TMP="$(mktemp -d)"
++
++port=$(get_random_port)
++tang_run "${TMP}" "${port}"
++
++url="http://localhost:${port}"
++data="just a sample text"
++
++adv="${TMP}/adv"
++# Get the advertisement and extract the keys.
++tang_get_adv "${port}" "${adv}"
++
++jwks="$(jose fmt --json="${adv}" --get payload --b64load --output=-)"
++enc="$(printf '%s' "${jwks}" | jose jwk use --input=- --required \
++       --use deriveKey --output=-)"
++
++jose fmt --json="${enc}" --get keys --array \
++      || enc="$(printf '{"keys": [%s]}' "${enc}")"
++
++jwk="$(jose fmt --json="${enc}" --get keys --array --foreach=- \
++       | jose fmt --json=- --delete key_ops --delete alg --output=-)"
++
++jwe_t='{"protected":{"alg":"ECDH-ES","enc":"A256GCM","clevis":{"pin":"tang","tang":{}}}}'
++jwe_t="$(jose fmt --json="${jwe_t}" --get protected --get clevis --get tang --quote "${url}" --set url -UUUUo-)"
++jwe_t="$(printf '%s' "${jwks}" | jose fmt --json="${jwe_t}" --get protected --get clevis --get tang --json=- --set adv -UUUUo-)"
++
++# We currently support SHA-1 (legacy) and SHA-256.
++CLEVIS_SUPPORTED_THP_ALGS="S1 S256"
++# Now we will use every hash algorithm supported by jose to create a thumbprint
++# for `kid', then we do the encoding and verify clevis decrypt can decode it
++# correctly.
++for alg in ${CLEVIS_SUPPORTED_THP_ALGS}; do
++    kid="$(printf '%s' "${jwk}" | jose jwk thp -a "${alg}" --input=-)"
++    jwe="$(jose fmt --json="${jwe_t}" --get protected --quote "${kid}" -s kid -UUo-)"
++
++    encoded=$(printf '%s%s' "${jwk}" "${data}" \
++              | jose jwe enc --input="${jwe}" --key=- --detached=- --compact)
++
++    if ! decoded="$(printf '%s' "${encoded}" | clevis decrypt)"; then
++        tang_error "${TEST}: decoding is expected to work (alg = ${alg})"
++    fi
++
++    if  [ "${decoded}" != "${data}" ]; then
++        tang_error "${TEST}: tang decrypt should have succeeded decoded[${decoded}] data[${data}] (alg = ${alg})"
++    fi
++done
++
++# Now let's test encryption providing the thp in the configuration.
++data="just another test"
++for alg in ${CLEVIS_SUPPORTED_THP_ALGS}; do
++    thp="$(jose fmt --json="${adv}" -g payload -y -o- \
++           | jose jwk use -i- -r -u verify -o- \
++           | jose jwk thp -i- -a "${alg}")"
++    cfg="$(printf '{"url":"%s", "thp":"%s"}' "${url}" "${thp}")"
++    if ! encoded=$(printf '%s' "${data}" | clevis encrypt tang "${cfg}"); then
++        tang_error "${TEST}: tang encryption should have succeeded when providing the thp (${thp}) with any supported algorithm (${alg})"
++    fi
++
++    if ! decoded="$(printf '%s' "${encoded}" | clevis decrypt)"; then
++        tang_error "${TEST}: decoding is expected to work (thp alg = ${alg})"
++    fi
++
++    if  [ "${decoded}" != "${data}" ]; then
++        tang_error "${TEST}: tang decrypt should have succeeded decoded[${decoded}] data[${data}] (alg = ${alg})"
++    fi
++done
++
++# Let's also try some unsupported thp hash algorithms.
++UNSUPPORTED="S224 S384 S512" # SHA-224, SHA-384, SHA-512.
++for alg in ${UNSUPPORTED}; do
++    thp="$(jose fmt --json="${adv}" -g payload -y -o- \
++           | jose jwk use -i- -r -u verify -o- \
++           | jose jwk thp -i- -a "${alg}")"
++    cfg="$(printf '{"url":"%s", "thp":"%s"}' "${url}" "${thp}")"
++    if echo foo | clevis encrypt tang "${cfg}" >/dev/null; then
++        tang_error "${TEST}: tang encryption should have failed when providing the thp (${thp}) with an unsupported algorithm (${alg})"
++    fi
++done
++
++# Now let's try some bad values for thp.
++for thp in "" "foo" "invalid"; do
++    cfg="$(printf '{"url":"%s", "thp":"%s"}' "${url}" "${thp}")"
++    if echo foo | clevis encrypt tang "${cfg}" >/dev/null; then
++        tang_error "${TEST}: tang encryption expected to fail when providing a bad thp"
++    fi
++done
