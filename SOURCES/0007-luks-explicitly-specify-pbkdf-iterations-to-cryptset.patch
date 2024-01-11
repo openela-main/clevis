@@ -1,0 +1,83 @@
+From ea5db9fdfaa92d2a3ec2446313dcaa00db57a0cc Mon Sep 17 00:00:00 2001
+From: Renaud Metrich <rmetrich@redhat.com>
+Date: Fri, 7 Jan 2022 12:13:03 -0300
+Subject: [PATCH 7/7] luks: explicitly specify pbkdf iterations to cryptsetup
+
+This fixes an Out of memory error when the system has not much memory,
+such as a VM configured with 2GB currently being installed through the
+network (hence having ~1GB free memory only).
+See RHBZ #1979256 (https://bugzilla.redhat.com/show_bug.cgi?id=1979256).
+---
+ src/luks/clevis-luks-bind.in          | 7 +++++--
+ src/luks/clevis-luks-common-functions | 7 ++++++-
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/src/luks/clevis-luks-bind.in b/src/luks/clevis-luks-bind.in
+index 4748c08..017f762 100755
+--- a/src/luks/clevis-luks-bind.in
++++ b/src/luks/clevis-luks-bind.in
+@@ -169,7 +169,9 @@ if ! cryptsetup luksOpen --test-passphrase "${DEV}" \
+     exit 1
+ fi
+ 
++pbkdf_args="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
+ if [ "$luks_type" == "luks1" ]; then
++    pbkdf_args=
+     # In certain circumstances, we may have LUKSMeta slots "not in sync" with
+     # cryptsetup, which means we will try to save LUKSMeta metadata over an
+     # already used or partially used slot -- github issue #70.
+@@ -184,7 +186,7 @@ fi
+ 
+ # Add the new key.
+ if [ -n "$SLT" ]; then
+-    cryptsetup luksAddKey --key-slot "$SLT" --key-file \
++    cryptsetup luksAddKey ${pbkdf_args} --key-slot "$SLT" --key-file \
+         <(echo -n "$existing_key") "$DEV"
+ else
+     if [ $luks_type == "luks2" ]; then
+@@ -194,7 +196,8 @@ else
+         readarray -t usedSlotsBeforeAddKey < <(cryptsetup luksDump "${DEV}" \
+             | sed -rn 's|^Key Slot ([0-7]): ENABLED$|\1|p')
+     fi
+-    cryptsetup luksAddKey --key-file <(echo -n "${existing_key}") "$DEV"
++    cryptsetup luksAddKey ${pbkdf_args} \
++        --key-file <(echo -n "${existing_key}") "$DEV"
+ fi < <(echo -n "${key}")
+ if [ $? -ne 0 ]; then
+     echo "Error while adding new key to LUKS header!" >&2
+diff --git a/src/luks/clevis-luks-common-functions b/src/luks/clevis-luks-common-functions
+index 67ece72..038cc37 100644
+--- a/src/luks/clevis-luks-common-functions
++++ b/src/luks/clevis-luks-common-functions
+@@ -760,10 +760,12 @@ clevis_luks_add_key() {
+         extra_args="$(printf -- '--key-file %s' "${KEYFILE}")"
+         input="$(printf '%s' "${NEWKEY}")"
+     fi
++    local pbkdf_args="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
+ 
+     printf '%s' "${input}" | cryptsetup luksAddKey --batch-mode \
+                                          --key-slot "${SLT}" \
+                                          "${DEV}" \
++                                         ${pbkdf_args} \
+                                          ${extra_args}
+ }
+ 
+@@ -792,11 +794,14 @@ clevis_luks_update_key() {
+         extra_args="$(printf -- '--key-file %s' "${KEYFILE}")"
+         input="$(printf '%s' "${NEWKEY}")"
+     fi
++    local pbkdf_args="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
+ 
+     if [ -n "${in_place}" ]; then
+         printf '%s' "${input}" | cryptsetup luksChangeKey "${DEV}" \
+                                             --key-slot "${SLT}" \
+-                                            --batch-mode ${extra_args}
++                                            --batch-mode \
++                                            ${pbkdf_args} \
++                                            ${extra_args}
+         return
+     fi
+ 
+-- 
+2.33.1
+
