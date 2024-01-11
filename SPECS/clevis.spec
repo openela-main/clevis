@@ -1,6 +1,6 @@
 Name:           clevis
 Version:        18
-Release:        110%{?dist}
+Release:        112%{?dist}
 Summary:        Automated decryption framework
 
 License:        GPLv3+
@@ -20,6 +20,7 @@ Patch0010: 0010-existing-luks2-token-id.patch
 Patch0011: 0011-ignore-empty-and-comment-lines-in-crypttab.patch
 Patch0012: 0012-luks-define-max-entropy-bits-for-pwmake.patch
 Patch0013: 0013-luks-edit-remove-unnecessary-redirection.patch
+Patch0014: 0014-remove-pwmake-for-password-generation.patch
 
 BuildRequires:  git-core
 BuildRequires:  gcc
@@ -42,7 +43,6 @@ BuildRequires:  systemd-rpm-macros
 BuildRequires:  dracut
 BuildRequires:  tang >= 6
 BuildRequires:  curl
-BuildRequires:  cracklib-dicts
 BuildRequires:  luksmeta
 BuildRequires:  openssl
 BuildRequires:  diffutils
@@ -56,7 +56,6 @@ Requires:       curl
 Requires:       jq
 Requires(pre):  shadow-utils
 Requires(post): systemd
-Recommends:     cracklib-dicts
 
 %description
 Clevis is a framework for automated decryption. It allows you to encrypt
@@ -200,15 +199,23 @@ systemctl preset %{name}-luks-askpass.path >/dev/null 2>&1 || :
 %attr(4755, root, root) %{_libexecdir}/%{name}-luks-udisks2
 
 %changelog
-* Wed Jan 25 2023 Sergio Arroutbi <sarroutb@redhat.com> - 15-110
+* Thu Jun 1 2023 Sergio Arroutbi <sarroutb@redhat.com> - 18-112
+- Remove pwmake for password generation
+  Resolves: rhbz#2207488
+
+* Thu May 4 2023 Sergio Arroutbi <sarroutb@redhat.com> - 18-111
+- Fix changelog to correct versions
+  Resolves: rhbz#2180451
+
+* Wed Jan 25 2023 Sergio Arroutbi <sarroutb@redhat.com> - 18-110
 - luks-edit: remove unnecessary 2>/dev/null
   Resolves: rhbz#2159738
 
-* Fri Jan 13 2023 Sergio Arroutbi <sarroutb@redhat.com> - 15-109
+* Fri Jan 13 2023 Sergio Arroutbi <sarroutb@redhat.com> - 18-109
 - luks: define max entropy bits for pwmake
   Resolves: rhbz#2159735
 
-* Thu Jan 12 2023 Sergio Arroutbi <sarroutb@redhat.com> - 15-108
+* Thu Jan 12 2023 Sergio Arroutbi <sarroutb@redhat.com> - 18-108
 - Ignore empty & comment lines in crypttab
   Resolves: rhbz#2159728
 
