@@ -1,26 +1,14 @@
 Name:           clevis
-Version:        18
-Release:        112%{?dist}
+Version:        20
+Release:        200%{?dist}
 Summary:        Automated decryption framework
 
 License:        GPLv3+
 URL:            https://github.com/latchset/%{name}
 Source0:        https://github.com/latchset/%{name}/releases/download/v%{version}/%{name}-%{version}.tar.xz
 Source1:        clevis.sysusers
+Patch1:         0001-Include-miscellaneous-sast-fixes-clevis-luks-udisk-2.patch
 
-Patch0001: 0001-sss-use-BN_set_word-x-0-instead-of-BN_zero.patch
-Patch0002: 0002-systemd-account-for-unlocking-failures-in-clevis-luk.patch
-Patch0004: 0004-luks-explicitly-specify-pbkdf-iterations-to-cryptset.patch
-Patch0005: 0005-tang-dump-url-on-error-communication.patch
-Patch0006: 0006-feat-rename-the-test-pin-to-null-pin.patch
-Patch0007: 0007-avoid-clevis-invalid-msg.patch
-Patch0008: 0008-Improve-boot-performance-by-removing-key-check.patch
-Patch0009: 0009-luks-enable-debugging-in-clevis-scripts-when-rd.debu.patch
-Patch0010: 0010-existing-luks2-token-id.patch
-Patch0011: 0011-ignore-empty-and-comment-lines-in-crypttab.patch
-Patch0012: 0012-luks-define-max-entropy-bits-for-pwmake.patch
-Patch0013: 0013-luks-edit-remove-unnecessary-redirection.patch
-Patch0014: 0014-remove-pwmake-for-password-generation.patch
 
 BuildRequires:  git-core
 BuildRequires:  gcc
@@ -184,6 +172,7 @@ systemctl preset %{name}-luks-askpass.path >/dev/null 2>&1 || :
 
 %files systemd
 %{_libexecdir}/%{name}-luks-askpass
+%{_libexecdir}/%{name}-luks-unlocker
 %{_unitdir}/%{name}-luks-askpass.path
 %{_unitdir}/%{name}-luks-askpass.service
 
@@ -199,6 +188,10 @@ systemctl preset %{name}-luks-askpass.path >/dev/null 2>&1 || :
 %attr(4755, root, root) %{_libexecdir}/%{name}-luks-udisks2
 
 %changelog
+* Tue May 21 2024 Sergio Arroutbi <sarroutb@redhat.com> - 20-200
+- Rebase to clevis-20
+  Resolves: #RHEL-29282
+
 * Thu Jun 1 2023 Sergio Arroutbi <sarroutb@redhat.com> - 18-112
 - Remove pwmake for password generation
   Resolves: rhbz#2207488
