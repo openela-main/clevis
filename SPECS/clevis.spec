@@ -1,14 +1,18 @@
 Name:           clevis
-Version:        20
-Release:        200%{?dist}
+Version:        21
+Release:        208%{?dist}
 Summary:        Automated decryption framework
 
 License:        GPLv3+
 URL:            https://github.com/latchset/%{name}
 Source0:        https://github.com/latchset/%{name}/releases/download/v%{version}/%{name}-%{version}.tar.xz
 Source1:        clevis.sysusers
-Patch1:         0001-Include-miscellaneous-sast-fixes-clevis-luks-udisk-2.patch
 
+Patch0:         0001-PKCS-11-pin-fix-dracut-for-unconfigured-device.patch
+Patch1:         0002-Fix-potential-race-condition.patch
+Patch2:         0003-Fix-to-start-pcscd-appropriately.patch
+Patch3:         0004-tpm2-use-first-pcr-algorithm-bank-supported-by.patch
+Patch4:         0005-Include-tpm2_getcap-as-dracut-required-binary.patch
 
 BuildRequires:  git-core
 BuildRequires:  gcc
@@ -16,6 +20,8 @@ BuildRequires:  meson
 BuildRequires:  asciidoc
 BuildRequires:  ninja-build
 BuildRequires:  bash-completion
+BuildRequires:  pcsc-lite
+BuildRequires:  opensc
 
 BuildRequires:  libjose-devel >= 8
 BuildRequires:  libluksmeta-devel >= 8
@@ -103,6 +109,20 @@ Requires:       %{name}-luks%{?_isa} = %{version}-%{release}
 Automatically unlocks LUKS block devices in desktop environments that
 use UDisks2 or storaged (like GNOME).
 
+%package pin-pkcs11
+Summary:        PKCS#11 for clevis
+Requires:       %{name}-systemd%{?_isa} = %{version}-%{release}
+Requires:       %{name}-luks%{?_isa} = %{version}-%{release}
+Requires:       %{name}-dracut%{?_isa} = %{version}-%{release}
+Requires:       pcsc-lite
+Requires:       opensc
+Requires:       socat
+Requires:       openssl
+
+
+%description pin-pkcs11
+Automatically unlocks LUKS block devices through a PKCS#11 device.
+
 %prep
 %autosetup -S git
 
@@ -183,11 +203,58 @@ systemctl preset %{name}-luks-askpass.path >/dev/null 2>&1 || :
 %{_prefix}/lib/dracut/modules.d/60%{name}-pin-tang/module-setup.sh
 %{_prefix}/lib/dracut/modules.d/60%{name}-pin-tpm2/module-setup.sh
 
+%files pin-pkcs11
+%{_libexecdir}/%{name}-luks-pkcs11-askpass
+%{_libexecdir}/%{name}-luks-pkcs11-askpin
+%{_bindir}/%{name}-decrypt-pkcs11
+%{_bindir}/%{name}-encrypt-pkcs11
+%{_bindir}/%{name}-pkcs11-afunix-socket-unlock
+%{_bindir}/%{name}-pkcs11-common
+%{_unitdir}/%{name}-luks-pkcs11-askpass.service
+%{_unitdir}/%{name}-luks-pkcs11-askpass.socket
+%{_mandir}/man1/%{name}-encrypt-pkcs11.1*
+%{_prefix}/lib/dracut/modules.d/60%{name}-pin-pkcs11/module-setup.sh
+%{_prefix}/lib/dracut/modules.d/60%{name}-pin-pkcs11/%{name}-pkcs11-hook.sh
+%{_prefix}/lib/dracut/modules.d/60%{name}-pin-pkcs11/%{name}-pkcs11-prehook.sh
+
 %files udisks2
 %{_sysconfdir}/xdg/autostart/%{name}-luks-udisks2.desktop
 %attr(4755, root, root) %{_libexecdir}/%{name}-luks-udisks2
 
 %changelog
+
+* Thu Jan 9 2025 Sergio Arroutbi <sarroutb@redhat.com> - 21-208
+- Include socat, openssl as PKCS#11 pin requirements
+  Resolves: #RHEL-72982
+
+* Fri Nov 22 2024 Sergio Arroutbi <sarroutb@redhat.com> - 21-207
+- Include tpm2_getcap as dracut required binary
+  Resolves: #RHEL-68638
+
+* Tue Nov 5 2024 Sergio Arroutbi <sarroutb@redhat.com> - 21-206
+- TPM2: use first PCR algorithm bank supported by TPM as default
+  Resolves: #RHEL-65468
+
+* Thu Oct 31 2024 Sergio Arroutbi <sarroutb@redhat.com> - 21-205
+- Groom clevis.spec
+  Resolves: #RHEL-65458
+
+* Fri Oct 11 2024 Sergio Arroutbi <sarroutb@redhat.com> - 21-204
+- Split PKCS#11 files into clevis-pin-pkcs11 package
+  Resolves: #RHEL-61941
+
+* Mon Oct 7 2024 Sergio Arroutbi <sarroutb@redhat.com> - 21-203
+- Fix to start pcscd appropriately
+  Resolves: #RHEL-61612
+
+* Tue Oct 01 2024 Sergio Arroutbi <sarroutb@redhat.com> - 21-202
+- Fix dracut startup issue
+  Resolves: #RHEL-61184
+
+* Thu Sep 26 2024 Sergio Arroutbi <sarroutb@redhat.com> - 21-201
+- Rebase to clevis-21
+  Resolves: #RHEL-60257
+
 * Tue May 21 2024 Sergio Arroutbi <sarroutb@redhat.com> - 20-200
 - Rebase to clevis-20
   Resolves: #RHEL-29282

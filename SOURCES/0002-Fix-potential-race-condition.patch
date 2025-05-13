@@ -1,0 +1,49 @@
+From 5feea5da42b98302006f2c82ab9c22d43779e0c8 Mon Sep 17 00:00:00 2001
+From: Sergio Arroutbi <sarroutb@redhat.com>
+Date: Fri, 27 Sep 2024 12:12:48 +0200
+Subject: [PATCH] Fix potential race condition
+
+Guard the modification of "entry_counter" and the read
+used to decide whether to modify "entry_counter" with the
+same set of locks
+
+Resolves: #478
+
+Signed-off-by: Sergio Arroutbi <sarroutb@redhat.com>
+---
+ src/pins/pkcs11/clevis-pkcs11-afunix-socket-unlock.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/pins/pkcs11/clevis-pkcs11-afunix-socket-unlock.c b/src/pins/pkcs11/clevis-pkcs11-afunix-socket-unlock.c
+index a6ecc63..b1e2004 100644
+--- a/src/pins/pkcs11/clevis-pkcs11-afunix-socket-unlock.c
++++ b/src/pins/pkcs11/clevis-pkcs11-afunix-socket-unlock.c
+@@ -70,21 +70,23 @@ get_control_socket_name(const char* file_sock, char* control_sock, uint32_t cont
+ }
+ 
+ static void insert_device(const char* dev) {
++    pthread_mutex_lock(&mutex);
+     if(MAX_ENTRIES == entry_counter) {
++        pthread_mutex_unlock(&mutex);
+         perror("No more entries accepted\n");
+         return;
+     }
+-    pthread_mutex_lock(&mutex);
+     strncpy(keys[entry_counter].dev, dev, MAX_DEVICE);
+     pthread_mutex_unlock(&mutex);
+ }
+ 
+ static void insert_key(const char* key) {
++    pthread_mutex_lock(&mutex);
+     if(MAX_ENTRIES == entry_counter) {
++        pthread_mutex_unlock(&mutex);
+         perror("No more entries accepted\n");
+         return;
+     }
+-    pthread_mutex_lock(&mutex);
+     strncpy(keys[entry_counter++].key, key, MAX_KEY);
+     pthread_mutex_unlock(&mutex);
+ }
+-- 
+2.46.2
+
