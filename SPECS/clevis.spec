@@ -1,6 +1,6 @@
 Name:           clevis
 Version:        21
-Release:        208%{?dist}
+Release:        209%{?dist}
 Summary:        Automated decryption framework
 
 License:        GPLv3+
@@ -222,6 +222,9 @@ systemctl preset %{name}-luks-askpass.path >/dev/null 2>&1 || :
 %attr(4755, root, root) %{_libexecdir}/%{name}-luks-udisks2
 
 %changelog
+* Mon Jan 12 2026 Sergio Correia <scorreia@redhat.com> - 21-209
+- Add clevis user to tss group via sysusers
+  Resolves: RHEL-132187
 
 * Thu Jan 9 2025 Sergio Arroutbi <sarroutb@redhat.com> - 21-208
 - Include socat, openssl as PKCS#11 pin requirements
